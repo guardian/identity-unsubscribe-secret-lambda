@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Braze unsubscribe secret endpoint - returns the password passed on basic auth
+
+Resources:
+
+  UnsubscribeTokenRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+
+  GatewayInvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      FunctionName: !GetAtt UnsubscribeTokenLambda.Arn
+
+  UnsubscribeTokenLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.lambda_handler"
+      Role:
+        Fn::GetAtt:
+          - "UnsubscribeTokenRole"
+          - "Arn"
+      Code:
+        ZipFile: !Sub |
+          import json
+          import base64
+          import logging
+
+
+          def lambda_handler(event, context):
+              log = logging.getLogger(__name__)
+              logging.getLogger().setLevel('INFO')
+
+              try:
+                  auth_header_value = {v for k, v in event['headers'].items() if k.lower() == 'authorization'}.pop()
+                  base64_username_password = auth_header_value.split()[1]
+                  username_password = base64.standard_b64decode(base64_username_password).decode('utf8')
+                  password = username_password.split(':')[1]
+                  return {
+                      "statusCode": 200,
+                      "body": json.dumps({"secret": password})
+                  }
+              except Exception as e:
+                  log.error(event, e)
+                  return {
+                      "statusCode": 401,
+                  }
+
+
+
+      Runtime: "python3.6"
+      Timeout: 25
+
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: braze_unsubscribe_token_api
+      Description: API for retrieving the unsubscribe secret
+
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: secret
+
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref Api
+      ResourceId: !Ref ApiResource
+      HttpMethod: GET
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UnsubscribeTokenLambda.Arn}/invocations
+
