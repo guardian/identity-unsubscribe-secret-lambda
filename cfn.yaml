@@ -61,13 +61,11 @@ Resources:
                       "statusCode": 200,
                       "body": json.dumps({"secret": password})
                   }
-              except Exception as e:
-                  log.error(event, e)
+              except:
+                  log.exception("failure to parse basic auth, event: %s" % event)
                   return {
-                      "statusCode": 401,
+                      "statusCode": 401
                   }
-
-
 
       Runtime: "python3.6"
       Timeout: 25
@@ -96,4 +94,10 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UnsubscribeTokenLambda.Arn}/invocations
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref Api
+      StageName: PROD
 
